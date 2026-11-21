@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<!--
+  Can We Do RLHF Without RL? Direct Preference Optimization as Logistic Regression
+  CIS 4190/5190 Deep Dive (Fall 2026) — interactive demo
+  Authors: Keyi Xiong, Shengdong Yao, Yilun Lu
+  License: MIT (see LICENSE)
+  Static and self-contained: no server, no network requests, no external libraries.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Can We Do RLHF Without RL? — DPO demo</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="viz-root">
+
+<header class="page-head">
+  <p class="eyebrow">CIS 4190/5190 Deep Dive · Fall 2026</p>
+  <h1>Can we do RLHF without RL?</h1>
+  <p class="lede">Two ways to align a toy language model with human preferences. Route 1 fits rewards with a Bradley–Terry model, then applies the closed-form KL-optimal policy. Route 2 (DPO) skips the reward model and trains the policy directly. Watch them arrive at the same policy, then see the one case where neither has a finite answer.</p>
+  <p class="byline">Keyi Xiong · Shengdong Yao · Yilun Lu</p>
+</header>
+
+<section class="card setup">
+  <h2>The toy language model</h2>
+  <p class="note">One prompt, six candidate responses. A policy is a probability for each response. The reference model π<sub>ref</sub> mostly gives the safe textbook answer C. Humans like A best, and it never appears in π<sub>ref</sub>'s top picks.</p>
+  <p class="prompt"><span class="tag">Prompt</span> “Explain overfitting in one sentence.”</p>
+  <ol class="responses" id="responseList"></ol>
+</section>
+
+<section class="card controls" aria-label="Controls">
+  <div class="ctl ctl-wide">
+    <span class="ctl-label" id="lblData">Preference data</span>
+    <div class="seg" role="group" aria-labelledby="lblData">
+      <button type="button" id="modeNoisy" aria-pressed="true">Noisy human preferences</button>
+      <button type="button" id="modeChamp" aria-pressed="false">Response A always wins</button>
+    </div>
+  </div>
+  <div class="ctl">
+    <label class="ctl-label" for="nPairs">Preference pairs <output id="nPairsOut"></output></label>
+    <input type="range" id="nPairs" min="50" max="2000" step="50" value="400">
+  </div>
+  <div class="ctl">
+    <label class="ctl-label" for="beta">KL strength β <output id="betaOut"></output></label>
+    <input type="range" id="beta" min="-1" max="1" step="0.02" value="0">
+    <span class="range-ends"><span>0.1 · chase reward</span><span>stay near π<sub>ref</sub> · 10</span></span>
+  </div>
+  <div class="ctl ctl-wide">
+    <label class="ctl-label" for="step">Gradient steps <output id="stepOut"></output></label>
+    <div class="step-row">
+      <button type="button" id="play" class="btn">▶ Play training</button>
+      <input type="range" id="step" min="0" max="1" step="1" value="1">
+    </div>
+  </div>
+  <div class="ctl ctl-row">
+    <button type="button" id="resample" class="btn">Resample data</button>
+    <label class="check"><input type="checkbox" id="matched"> <span>Match step sizes (η<sub>θ</sub> = η<sub>r</sub> / β²)</span></label>
+  </div>
+</section>
+
+<section class="tiles" aria-label="Summary">
+  <div class="tile"><p class="tile-label">Gap between the two policies</p><p class="tile-value" id="tvVal"></p><p class="tile-sub">total variation distance</p></div>
+  <div class="tile"><p class="tile-label">DPO distance from π<sub>ref</sub></p><p class="tile-value" id="klVal"></p><p class="tile-sub">KL(π<sub>θ</sub> ‖ π<sub>ref</sub>), in nats</p></div>
+  <div class="tile"><p class="tile-label">DPO reward margin</p><p class="tile-value" id="marginVal"></p><p class="tile-sub">best response minus runner-up</p></div>
+  <div class="tile"><p class="tile-label">DPO probability of response A</p><p class="tile-value" id="pTopVal"></p><p class="tile-sub" id="pTopSub"></p></div>
+</section>
+
+<p class="callout" id="callout" role="status"></p>
+
+<div class="legend" aria-label="Legend">
+  <span class="key"><span class="swatch s1"></span>Route 1 · Bradley–Terry reward fit + closed-form KL-optimal policy</span>
+  <span class="key"><span class="swatch s2"></span>Route 2 · DPO, trained directly</span>
+  <span class="key"><span class="swatch ref"></span><span id="legendRef">Reference policy π<sub>ref</sub> / true reward</span></span>
+</div>
+
+<section class="grid2">
+  <figure class="card chart">
+    <figcaption><h2>Policy</h2><p class="note">Probability each route assigns to each response.</p></figcaption>
+    <div id="policyChart" class="plot"></div>
+  </figure>
+  <figure class="card chart">
+    <figcaption><h2>Reward</h2><p class="note">Route 1 learns it. Route 2 implies it: β·log(π<sub>θ</sub>/π<sub>ref</sub>). Both centered at zero.</p></figcaption>
+    <div id="rewardChart" class="plot"></div>
+  </figure>
+</section>
+
+<section class="grid3">
+  <figure class="card chart">
+    <figcaption><h2>Loss</h2><p class="note">Negative log-likelihood of the preference pairs.</p></figcaption>
+    <div id="lossChart" class="plot"></div>
+  </figure>
+  <figure class="card chart">
+    <figcaption><h2>Reward margin</h2><p class="note">Best response minus runner-up.</p></figcaption>
+    <div id="marginChart" class="plot"></div>
+  </figure>
+  <figure class="card chart">
+    <figcaption><h2>Distance from π<sub>ref</sub></h2><p class="note">KL(π ‖ π<sub>ref</sub>), the term β is meant to control.</p></figcaption>
+    <div id="klChart" class="plot"></div>
+  </figure>
+</section>
+
+<section class="card">
+  <details>
+    <summary>Show the numbers (table view)</summary>
+    <div class="tables">
+      <div><h3>Current step</h3><div id="valueTable"></div></div>
+      <div><h3>Preference data: times the row response beat the column response</h3><div id="winsTable"></div></div>
+    </div>
+  </details>
+</section>
+
+<section class="card explain">
+  <h2>What the two routes compute</h2>
+  <div class="grid2 tight">
+    <div>
+      <h3>Route 1 · Bradley–Terry reward fit + closed-form policy</h3>
+      <p>Fit rewards r by logistic regression on the pairs (Bradley–Terry):</p>
+      <p class="eq">L<sub>R</sub>(r) = − mean log σ( r<sub>w</sub> − r<sub>l</sub> )</p>
+      <p>Then use the closed-form optimum of the KL-regularized objective:</p>
+      <p class="eq">π*(y) ∝ π<sub>ref</sub>(y) · exp( r(y) / β )</p>
+    </div>
+    <div>
+      <h3>Route 2 · DPO</h3>
+      <p>Skip the reward model. Run gradient descent on the policy logits θ:</p>
+      <p class="eq">L<sub>DPO</sub>(θ) = − mean log σ( β log[π<sub>θ</sub>(y<sub>w</sub>)/π<sub>ref</sub>(y<sub>w</sub>)] − β log[π<sub>θ</sub>(y<sub>l</sub>)/π<sub>ref</sub>(y<sub>l</sub>)] )</p>
+      <p>With r = β(θ − log π<sub>ref</sub>) this is the same loss as Route 1. With six free logits and the same data, π<sub>ref</sub> and β, the two share an optimal policy whenever a finite best-fit reward exists.</p>
+    </div>
+  </div>
+  <h3>Things to try</h3>
+  <ol class="try">
+    <li>Press <b>Play training</b>. The routes take different paths and meet at the same policy.</li>
+    <li>Stop on the <b>Policy</b> chart at β = 1. Response A has the highest reward, yet C is still the most likely answer. The policy is π<sub>ref</sub> reweighted by exp(r/β), and π<sub>ref</sub> starts C at 30% and A at 5%. Drag <b>β</b> down to 0.1 and A climbs to about 98%.</li>
+    <li>While you drag β, watch the <b>Reward</b> chart. It does not move. β changes how reward turns into a policy, not the reward that is learned.</li>
+    <li>Tick <b>Match step sizes</b> and play again. One DPO step of size η moves the implicit reward by η·β², so with η<sub>θ</sub> = η<sub>r</sub>/β² the two paths coincide at every step.</li>
+    <li>Switch to <b>Response A always wins</b>. The reward margin has no finite optimum and keeps growing. For any fixed β the policy drifts toward “always answer A”, and a larger β keeps it closer to π<sub>ref</sub> at any given step.</li>
+  </ol>
+  <p class="note"><b>About step sizes.</b> Route 1 uses η<sub>r</sub> = 2. Route 2 uses η<sub>θ</sub> = 0.5·η<sub>r</sub>/β² (or η<sub>r</sub>/β² when matched). Scaling by 1/β² makes the implicit reward move at the same pace for every β, which is why the reward-margin curve does not change when you drag β. With one fixed η<sub>θ</sub>, a larger β would take larger steps in reward space.</p>
+</section>
+
+<footer class="page-foot">
+  <p>Keyi Xiong, Shengdong Yao, Yilun Lu · CIS 4190/5190 Deep Dive, University of Pennsylvania, Fall 2026 · Code released under the MIT License.</p>
+  <p>Based on Rafailov et al. (2023), <i>Direct Preference Optimization: Your Language Model is Secretly a Reward Model</i>, and Azar et al. (2024), <i>A General Theoretical Paradigm to Understand Learning from Human Preferences</i>.</p>
+</footer>
+
+<div id="tooltip" class="tooltip" hidden></div>
+</div>
+
+<script src="dpo-core.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
