@@ -1,0 +1,382 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:06.720
+Hi, we're Keyi, Shengdong and Yilun,
+and this is a CIS 5190 Deep Dive.
+
+00:00:06.720 --> 00:00:13.920
+Our question: can you align a language model with
+human feedback without any reinforcement learning?
+
+00:00:13.920 --> 00:00:16.320
+Here is the usual recipe.
+
+00:00:16.320 --> 00:00:22.080
+You collect pairs of responses and
+ask people which one is better.
+
+00:00:22.080 --> 00:00:26.400
+Stage one trains a reward
+model on those choices.
+
+00:00:26.400 --> 00:00:30.720
+Stage two runs reinforcement
+learning to earn high reward,
+
+00:00:30.720 --> 00:00:35.520
+with a penalty for drifting
+from where the model started.
+
+00:00:35.520 --> 00:00:41.760
+In 2023, a paper called Direct Preference
+Optimization showed that you can delete
+
+00:00:41.760 --> 00:00:45.600
+both stages and use a single loss instead.
+
+00:00:45.600 --> 00:00:51.840
+And it is a loss you already know
+from this class: logistic regression.
+
+00:00:51.840 --> 00:00:58.080
+This builds on three parts of the course:
+logistic regression and maximum likelihood,
+
+00:00:58.080 --> 00:01:04.800
+language models, and the RL module, which
+gives us the objective we start from.
+
+00:01:04.800 --> 00:01:10.560
+By the end, you should be
+able to derive the DPO loss,
+
+00:01:10.560 --> 00:01:16.320
+explain what beta controls, and
+say when DPO has no finite optimum.
+
+00:01:16.320 --> 00:01:18.240
+Start with the data.
+
+00:01:18.240 --> 00:01:24.000
+One prompt, two responses, and a
+person picks the one they prefer:
+
+00:01:24.000 --> 00:01:27.360
+y-w, the winner, and y-l, the loser.
+
+00:01:27.360 --> 00:01:32.160
+The Bradley–Terry model gives
+each response a hidden score, r.
+
+00:01:32.160 --> 00:01:39.360
+The probability that the winner is preferred
+is the sigmoid of the difference in scores.
+
+00:01:39.360 --> 00:01:45.120
+That is logistic regression, where
+the logit is a difference of rewards.
+
+00:01:45.120 --> 00:01:50.400
+So a reward model is trained with
+the usual negative log-likelihood.
+
+00:01:50.400 --> 00:01:51.840
+Remember two things.
+
+00:01:51.840 --> 00:01:54.240
+Only differences of reward matter.
+
+00:01:54.240 --> 00:02:01.440
+And like any logistic regression, this has
+no finite solution if the data are separable.
+
+00:02:01.440 --> 00:02:02.880
+Now stage two.
+
+00:02:02.880 --> 00:02:07.200
+RLHF wants the policy pi that
+maximizes expected reward,
+
+00:02:07.200 --> 00:02:12.480
+minus beta times the KL divergence
+from a reference model, pi-ref.
+
+00:02:12.480 --> 00:02:16.800
+KL is zero only when the
+two distributions match,
+
+00:02:16.800 --> 00:02:21.600
+so a large beta keeps the
+policy near the reference.
+
+00:02:21.600 --> 00:02:24.480
+Usually this is optimized with PPO.
+
+00:02:24.480 --> 00:02:27.360
+But it has an exact solution.
+
+00:02:27.360 --> 00:02:33.600
+Write the reward as beta
+times the log of e to the r
+
+00:02:33.600 --> 00:02:37.440
+over beta, and fold it into the logarithm.
+
+00:02:37.440 --> 00:02:43.680
+The objective now looks almost like
+a KL divergence between pi and pi-ref
+
+00:02:43.680 --> 00:02:47.040
+times e to the r over beta.
+
+00:02:47.040 --> 00:02:53.280
+That does not sum to one,
+so we divide by its sum, Z.
+
+00:02:53.280 --> 00:02:59.520
+What is left is minus beta
+times the KL between pi and a
+
+00:02:59.520 --> 00:03:02.400
+new distribution,
+pi-star, plus a constant.
+
+00:03:02.400 --> 00:03:05.760
+KL is zero when pi equals pi-star.
+
+00:03:05.760 --> 00:03:11.520
+So the best policy is the reference
+model, reweighted by exponentiated reward.
+
+00:03:11.520 --> 00:03:13.440
+There is a catch.
+
+00:03:13.440 --> 00:03:19.680
+Z sums over every possible response,
+which is hopeless for a language model.
+
+00:03:19.680 --> 00:03:22.080
+Here is the key move.
+
+00:03:22.080 --> 00:03:24.960
+Step one: solve for the reward.
+
+00:03:24.960 --> 00:03:31.680
+It equals beta times the log-ratio of
+pi-star to pi-ref, plus beta log Z.
+
+00:03:31.680 --> 00:03:35.040
+So any policy secretly defines a reward.
+
+00:03:35.040 --> 00:03:41.760
+Step two: Bradley–Terry only needs the
+difference of two rewards for the same prompt.
+
+00:03:41.760 --> 00:03:45.120
+Both carry the same beta log Z.
+
+00:03:45.120 --> 00:03:47.520
+Subtract, and Z is gone.
+
+00:03:47.520 --> 00:03:52.320
+Step three: put what is
+left into the logistic loss,
+
+00:03:52.320 --> 00:03:56.640
+with our trainable model
+pi-theta in place of pi-star.
+
+00:03:56.640 --> 00:03:59.040
+This is the DPO loss.
+
+00:03:59.040 --> 00:04:02.400
+No reward network, no sampling, no Z.
+
+00:04:02.400 --> 00:04:08.160
+Its gradient pushes the chosen response
+up relative to the rejected one,
+
+00:04:08.160 --> 00:04:12.960
+weighted by how badly the model
+currently ranks that pair.
+
+00:04:12.960 --> 00:04:16.800
+How close is DPO to the two-stage recipe?
+
+00:04:16.800 --> 00:04:20.160
+In a small problem, they are identical.
+
+00:04:20.160 --> 00:04:24.480
+Take six responses with one
+free logit, theta, each.
+
+00:04:24.480 --> 00:04:28.800
+Define r as beta times
+theta minus log pi-ref.
+
+00:04:28.800 --> 00:04:35.040
+Then the DPO loss is exactly the Bradley–Terry
+loss: same function, different coordinates.
+
+00:04:35.040 --> 00:04:39.360
+My teammate will now test that in a demo.
+
+00:04:39.360 --> 00:04:49.060
+This is our toy language model: six candidate
+answers and four hundred noisy preference pairs.
+
+00:04:49.060 --> 00:04:56.820
+Route 1, in blue, fits Bradley–Terry
+rewards and applies the closed-form policy.
+
+00:04:56.820 --> 00:05:03.933
+Route 2, in orange, is DPO,
+trained directly on the logits.
+
+00:05:03.933 --> 00:05:05.227
+Press play.
+
+00:05:05.227 --> 00:05:11.693
+They take different paths
+and land on the same policy.
+
+00:05:11.693 --> 00:05:20.100
+The gap between them falls from
+about five percent to below ten to
+
+00:05:20.100 --> 00:05:25.920
+the minus fourteen, and both
+gradients are essentially zero.
+
+00:05:25.920 --> 00:05:33.033
+If we match the step sizes,
+using eta times beta squared,
+
+00:05:33.033 --> 00:05:37.560
+the two paths coincide at every step.
+
+00:05:37.560 --> 00:05:41.146
+Now look at beta equals one.
+
+00:05:41.146 --> 00:05:50.111
+Response A has the highest learned reward,
+but the most likely answer is still C.
+
+00:05:50.111 --> 00:05:50.708
+Why?
+
+00:05:50.708 --> 00:05:56.087
+The policy is the reference
+model reweighted by reward,
+
+00:05:56.087 --> 00:06:02.661
+and the reference gave C
+thirty percent and A only five.
+
+00:06:02.661 --> 00:06:09.833
+At beta equals zero point one, A
+jumps to about ninety-eight percent.
+
+00:06:09.833 --> 00:06:16.407
+At beta equals ten, the policy
+is almost exactly the reference.
+
+00:06:16.407 --> 00:06:19.395
+The reward bars never move.
+
+00:06:19.395 --> 00:06:23.579
+Beta does not change what is learned.
+
+00:06:23.579 --> 00:06:28.360
+It changes how strongly we act on it.
+
+00:06:28.360 --> 00:06:30.417
+Now the failure case.
+
+00:06:30.417 --> 00:06:35.045
+Suppose A beats every other
+response, every single time.
+
+00:06:35.045 --> 00:06:37.616
+This is the separable case.
+
+00:06:37.616 --> 00:06:44.816
+Raising A's reward always lowers the
+loss, so there is no finite best answer.
+
+00:06:44.816 --> 00:06:50.473
+On noisy data, the reward
+margin levels off near one half.
+
+00:06:50.473 --> 00:06:58.186
+Here it keeps climbing, by about two point
+three for every tenfold increase in steps.
+
+00:06:58.186 --> 00:07:03.843
+Both routes do this, because they
+are the same logistic regression.
+
+00:07:03.843 --> 00:07:08.471
+Azar and co-authors pointed
+out this weakness in 2024.
+
+00:07:08.471 --> 00:07:11.557
+So what does beta do now?
+
+00:07:11.557 --> 00:07:15.156
+At any fixed step, it still matters.
+
+00:07:15.156 --> 00:07:21.327
+After ten thousand steps, the
+margin is the same for every beta,
+
+00:07:21.327 --> 00:07:26.984
+but the probability of A is
+ninety-nine percent at beta one,
+
+00:07:26.984 --> 00:07:31.612
+forty-six at beta three,
+and eleven at beta ten.
+
+00:07:31.612 --> 00:07:37.269
+What beta no longer gives
+you is a place to stop.
+
+00:07:37.269 --> 00:07:43.440
+For any fixed beta, the policy keeps
+drifting toward always answering A.
+
+00:07:43.440 --> 00:07:44.400
+Three takeaways.
+
+00:07:44.400 --> 00:07:49.200
+One: learning a reward from pairwise
+preferences is logistic regression.
+
+00:07:49.200 --> 00:07:56.880
+Two: the KL-regularized objective has a closed-form answer,
+and because preferences are pairwise, the normalizer cancels.
+
+00:07:56.880 --> 00:07:59.280
+That gives the DPO loss.
+
+00:07:59.280 --> 00:08:04.560
+Three: DPO inherits a failure of
+logistic regression on separable data.
+
+00:08:04.560 --> 00:08:09.840
+Beta controls how far the
+policy moves at a given step,
+
+00:08:09.840 --> 00:08:13.200
+but it cannot supply a finite optimum.
+
+00:08:13.200 --> 00:08:17.040
+Here are two questions to
+check your understanding.
+
+00:08:17.040 --> 00:08:20.400
+The answers are in the slide notes.
+
+00:08:20.400 --> 00:08:21.840
+Thanks for watching.
